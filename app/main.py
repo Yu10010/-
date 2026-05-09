@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app.context_clients import ExternalContextClient, IncidentLocation, extract_location
 from app.llm_client import create_llm_client
 from app.schemas import RescuePlanRequest, RescuePlanResponse
+from app.cnn_inference import predict_wildfire
 
 app = FastAPI(
     title="Wildfire Rescue Planning Bridge",
@@ -60,13 +61,22 @@ async def _load_json_payload(
     return parsed
 
 
-async def _encode_image(image: UploadFile | None) -> tuple[str | None, str | None]:
+async def _read_image_upload(image: UploadFile | None) -> tuple[bytes | None, str | None]:
     if image is None:
         return None, None
+
     content = await image.read()
     if not content:
         raise HTTPException(status_code=400, detail="Uploaded image is empty.")
-    return base64.b64encode(content).decode("ascii"), image.content_type
+
+    return content, image.content_type
+
+
+def _encode_image_bytes(image_bytes: bytes | None) -> str | None:
+    if image_bytes is None:
+        return None
+
+    return base64.b64encode(image_bytes).decode("ascii")
 
 
 @app.get("/health")
@@ -75,6 +85,18 @@ def health() -> dict[str, str]:
 
     return {"status": "ok"}
 
+@app.post("/wildfire/classify")
+async def wildfire_classify(
+    image: Annotated[
+        UploadFile,
+        File(description="Image to classify using the local wildfire CNN."),
+    ],
+) -> dict[str, Any]:
+    image_bytes, _ = await _read_image_upload(image)
+    if image_bytes is None:
+        raise HTTPException(status_code=400, detail="Image is required.")
+
+    return predict_wildfire(image_bytes)
 
 @app.post("/wildfire/rescue-plan", response_model=RescuePlanResponse)
 async def wildfire_rescue_plan(
@@ -121,8 +143,19 @@ async def wildfire_rescue_plan(
 ) -> RescuePlanResponse:
     """Generate a Llama-backed wildfire rescue plan from CNN JSON plus optional image."""
 
+    image_bytes, image_mime_type = await _read_image_upload(image)
+
+if cnn_payload is None and cnn_json is None:
+    if image_bytes is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide cnn_payload/cnn_json or upload an image for CNN inference.",
+        )
+    cnn_output = predict_wildfire(image_bytes)
+else:
     cnn_output = await _load_json_payload(cnn_payload, cnn_json)
-    image_base64, image_mime_type = await _encode_image(image)
+
+image_base64 = _encode_image_bytes(image_bytes)
 
     external_context = None
     location = extract_location(cnn_output, latitude, longitude)
