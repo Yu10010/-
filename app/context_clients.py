@@ -122,7 +122,6 @@ class ExternalContextClient:
             weather = await self._safe_call(self._fetch_openweather(client, location))
             osm = await self._safe_call(self._fetch_osm_context(client, location))
             terrain = await self._safe_call(self._fetch_terrain_context(client, location))
-            landfire = await self._safe_call(self._fetch_landfire_context(client, location))
 
         return {
             "incident_location": {
@@ -133,7 +132,6 @@ class ExternalContextClient:
             "openweather": weather,
             "openstreetmap": osm,
             "usgs_national_map": terrain,
-            "landfire": landfire,
         }
 
     async def _safe_call(self, coroutine: Any) -> dict[str, Any]:
@@ -186,7 +184,14 @@ class ExternalContextClient:
         self, client: httpx.AsyncClient, location: IncidentLocation
     ) -> dict[str, Any]:
         query = _build_overpass_query(location)
-        response = await client.post(self.config.overpass_url, data={"data": query})
+        response = await client.post(
+    self.config.overpass_url,
+    data={"data": query},
+    headers={
+        "User-Agent": "wildfire-api-demo/0.1 student project",
+        "Accept": "application/json",
+    },
+)
         response.raise_for_status()
         raw = response.json()
         features = [_summarize_osm_element(element) for element in raw.get("elements", [])]
@@ -329,7 +334,7 @@ def _build_overpass_query(location: IncidentLocation) -> str:
   node["tourism"~"^(camp_site|caravan_site)$"](around:{radius},{lat},{lon});
   way["tourism"~"^(camp_site|caravan_site)$"](around:{radius},{lat},{lon});
 );
-out center tags qt 75;
+out body center qt 75;
 """
 
 

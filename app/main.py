@@ -15,6 +15,7 @@ from app.llm_client import create_llm_client
 from app.schemas import RescuePlanRequest, RescuePlanResponse
 from app.cnn_inference import predict_wildfire
 
+
 app = FastAPI(
     title="Wildfire Rescue Planning Bridge",
     description=(
@@ -33,6 +34,7 @@ async def _load_json_payload(
             status_code=400,
             detail="Send either cnn_payload form text or cnn_json file, not both.",
         )
+
     if not cnn_payload and not cnn_json:
         raise HTTPException(
             status_code=400,
@@ -46,18 +48,24 @@ async def _load_json_payload(
             raw_payload = (await cnn_json.read()).decode()
         else:
             raw_payload = ""
+
         parsed = json.loads(raw_payload)
+
     except UnicodeDecodeError as exc:
         raise HTTPException(
-            status_code=400, detail="CNN JSON file must be UTF-8."
+            status_code=400,
+            detail="CNN JSON file must be UTF-8.",
         ) from exc
+
     except json.JSONDecodeError as exc:
         raise HTTPException(
-            status_code=400, detail=f"Invalid CNN JSON: {exc.msg}"
+            status_code=400,
+            detail=f"Invalid CNN JSON: {exc.msg}",
         ) from exc
 
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=400, detail="CNN JSON must be an object.")
+
     return parsed
 
 
@@ -85,6 +93,7 @@ def health() -> dict[str, str]:
 
     return {"status": "ok"}
 
+
 @app.post("/wildfire/classify")
 async def wildfire_classify(
     image: Annotated[
@@ -92,11 +101,14 @@ async def wildfire_classify(
         File(description="Image to classify using the local wildfire CNN."),
     ],
 ) -> dict[str, Any]:
+    """Classify a wildfire image using the local CNN ensemble only."""
+
     image_bytes, _ = await _read_image_upload(image)
     if image_bytes is None:
         raise HTTPException(status_code=400, detail="Image is required.")
 
     return predict_wildfire(image_bytes)
+
 
 @app.post("/wildfire/rescue-plan", response_model=RescuePlanResponse)
 async def wildfire_rescue_plan(
@@ -141,30 +153,32 @@ async def wildfire_rescue_plan(
         Form(description="Include the raw upstream LLM response for debugging."),
     ] = False,
 ) -> RescuePlanResponse:
-    """Generate a Llama-backed wildfire rescue plan from CNN JSON plus optional image."""
+    """Generate a Llama-backed wildfire rescue plan from CNN output and optional image."""
 
     image_bytes, image_mime_type = await _read_image_upload(image)
 
-if cnn_payload is None and cnn_json is None:
-    if image_bytes is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Provide cnn_payload/cnn_json or upload an image for CNN inference.",
-        )
-    cnn_output = predict_wildfire(image_bytes)
-else:
-    cnn_output = await _load_json_payload(cnn_payload, cnn_json)
+    if cnn_payload is None and cnn_json is None:
+        if image_bytes is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide cnn_payload/cnn_json or upload an image for CNN inference.",
+            )
+        cnn_output = predict_wildfire(image_bytes)
+    else:
+        cnn_output = await _load_json_payload(cnn_payload, cnn_json)
 
-image_base64 = _encode_image_bytes(image_bytes)
+    image_base64 = _encode_image_bytes(image_bytes)
 
     external_context = None
     location = extract_location(cnn_output, latitude, longitude)
+
     if location is not None:
         location = IncidentLocation(
             latitude=location.latitude,
             longitude=location.longitude,
             radius_meters=context_radius_meters,
         )
+
     if gather_external_context and location is not None:
         external_context = await ExternalContextClient().gather(location)
     elif gather_external_context:
@@ -184,6 +198,7 @@ image_base64 = _encode_image_bytes(image_bytes)
         raise HTTPException(status_code=400, detail=exc.errors()) from exc
 
     client = create_llm_client()
+
     try:
         plan, raw_response = await client.build_plan(request)
     except httpx.HTTPStatusError as exc:
@@ -193,7 +208,8 @@ image_base64 = _encode_image_bytes(image_bytes)
         ) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(
-            status_code=502, detail=f"LLM provider error: {exc}"
+            status_code=502,
+            detail=f"LLM provider error: {exc}",
         ) from exc
 
     return RescuePlanResponse(
