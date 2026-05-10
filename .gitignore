@@ -1,4 +1,11 @@
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
+﻿.venv/
+__pycache__/
+*/__pycache__/
+*.pyc
+.env
+.cache/
+frame.jpg
+cnn_output.json
+ollama_test.json
+mock_ollama.py
+Test_Images/
